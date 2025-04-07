@@ -62,9 +62,8 @@ func shortenURL(db *sql.DB) echo.HandlerFunc {
 			return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request"})
 		}
 
-		// Validate URL: Must contain "heymarvin.com"
-		if !strings.Contains(req.URL, "heymarvin.com") {
-			return c.JSON(http.StatusBadRequest, echo.Map{"error": "URL must contain 'heymarvin.com'"})
+		if !strings.Contains(req.URL, "heymarvin.com") && !strings.Contains(req.URL, "qual.so") && !strings.Contains(req.URL, "localhost:") {
+			return c.JSON(http.StatusBadRequest, echo.Map{"error": "Invalid request host."})
 		}
 
 		// Check Redis for existing short code
@@ -100,7 +99,7 @@ func shortenURL(db *sql.DB) echo.HandlerFunc {
 		client.Set(ctx, "url:"+req.URL, shortCode, 0)
 		client.Set(ctx, shortCode, req.URL, 0)
 
-		return c.JSON(http.StatusOK, echo.Map{"short_url": fmt.Sprintf("%s%s", appBaseURL, shortCode)})
+		return c.JSON(http.StatusOK, echo.Map{"short_url": shortCode})
 	}
 }
 
@@ -134,6 +133,36 @@ func redirectURL(db *sql.DB) echo.HandlerFunc {
 	}
 }
 
+func unPartShort(db *sql.DB) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		shortCode := c.Param("shortcode")
+
+		// Check Redis
+		originalURL, err := client.Get(ctx, shortCode).Result()
+		if err == nil {
+			client.Incr(ctx, fmt.Sprintf("count:%s", shortCode))
+			return c.JSON(http.StatusOK, echo.Map{"part_url": originalURL})
+		} else if err != redis.Nil {
+			log.Printf("Redis error: %v", err)
+		}
+
+		// Check SQLite if not in Redis
+		err = db.QueryRow("SELECT original_url FROM short_urls WHERE short_code = ?", shortCode).Scan(&originalURL)
+		if err == sql.ErrNoRows {
+			return c.JSON(http.StatusNotFound, echo.Map{"error": "Short URL not found"})
+		} else if err != nil {
+			log.Printf("SQLite error: %v", err)
+			return c.JSON(http.StatusInternalServerError, echo.Map{"error": "Database error"})
+		}
+
+		// Cache in Redis
+		client.Set(ctx, shortCode, originalURL, 0)
+
+		client.Incr(ctx, fmt.Sprintf("count:%s", shortCode))
+		return c.JSON(http.StatusOK, echo.Map{"part_url": originalURL})
+	}
+}
+
 func main() {
 	// Initialize SQLite
 	db, err := sql.Open("sqlite", dbFile)
@@ -160,6 +189,7 @@ func main() {
 
 	e.POST("/shorten", shortenURL(db))
 	e.GET("/:shortcode", redirectURL(db))
+	e.GET("/s/:shortcode", unPartShort(db))
 
 	log.Printf("Server started at %s", appBaseURL)
 	e.Start(":9003")
