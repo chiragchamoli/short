@@ -69,7 +69,7 @@ func shortenURL(db *sql.DB) echo.HandlerFunc {
 		// Check Redis for existing short code
 		existingCode, err := client.Get(ctx, "url:"+req.URL).Result()
 		if err == nil {
-			return c.JSON(http.StatusOK, echo.Map{"short_url": fmt.Sprintf("%s%s", appBaseURL, existingCode)})
+			return c.JSON(http.StatusOK, echo.Map{"short_url": existingCode})
 		} else if err != redis.Nil {
 			log.Printf("Redis error: %v", err) // Log Redis errors instead of failing silently
 		}
@@ -80,7 +80,7 @@ func shortenURL(db *sql.DB) echo.HandlerFunc {
 		if err == nil {
 			client.Set(ctx, "url:"+req.URL, shortCode, 0)
 			client.Set(ctx, shortCode, req.URL, 0)
-			return c.JSON(http.StatusOK, echo.Map{"short_url": fmt.Sprintf("%s%s", appBaseURL, shortCode)})
+			return c.JSON(http.StatusOK, echo.Map{"short_url": shortCode})
 		} else if err != sql.ErrNoRows {
 			log.Printf("SQLite error: %v", err) // Log unexpected SQLite errors
 		}
